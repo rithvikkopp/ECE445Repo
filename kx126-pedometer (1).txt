@@ -1,0 +1,147 @@
+#include <Wire.h>
+
+// KX126-1063 I2C address
+#define KX126_ADDR 0x1F
+
+// Register addresses
+#define KX126_WHO_AM_I          0x00
+#define KX126_CNTL1            0x18
+#define KX126_ODCNTL           0x1B
+#define KX126_INC1             0x1C
+#define KX126_INC2             0x1D
+#define KX126_INC3             0x1E
+#define KX126_WUFC             0x23  // Wake-Up Function Counter
+#define KX126_PED_CNTL1        0x56
+#define KX126_PED_CNTL2        0x57
+#define KX126_PED_CNTL3        0x58
+#define KX126_PED_CNTL4        0x59
+#define KX126_PED_CNTL5        0x5A
+#define KX126_PED_DATA         0x5B  // Step counter output
+
+// Output pin for step threshold signal
+const int SIGNAL_PIN = 13;  // Using onboard LED
+const int STEP_THRESHOLD = 250;
+
+// Variables for step counting
+uint16_t stepCount = 0;
+bool thresholdReached = false;
+
+void setup() {
+  Wire.begin();
+  Serial.begin(9600);
+  
+  // Initialize output pin
+  pinMode(SIGNAL_PIN, OUTPUT);
+  digitalWrite(SIGNAL_PIN, LOW);
+  
+  // Check if sensor is responding
+  byte whoAmI = readRegister(KX126_WHO_AM_I);
+  if (whoAmI != 0x38) {  // 0x38 is the expected WHO_AM_I value for KX126
+    Serial.println("Error: KX126 sensor not found!");
+    while(1);  // Halt if sensor not found
+  }
+  
+  // Initialize sensor for pedometer function
+  initializePedometer();
+  
+  Serial.println("KX126 Pedometer initialized!");
+}
+
+void loop() {
+  // Read step count from sensor
+  uint16_t steps = readStepCount();
+  
+  if (steps != stepCount) {
+    stepCount = steps;
+    Serial.print("Steps: ");
+    Serial.println(stepCount);
+    
+    // Check if threshold reached
+    if (stepCount >= STEP_THRESHOLD && !thresholdReached) {
+      digitalWrite(SIGNAL_PIN, HIGH);
+      thresholdReached = true;
+      Serial.println("Step threshold reached!");
+    }
+  }
+  
+  delay(100);  // Short delay between readings
+}
+
+void initializePedometer() {
+  // Put sensor in standby mode to configure
+  writeRegister(KX126_CNTL1, 0x00);
+  delay(50);
+  
+  // Configure Output Data Rate (ODR) for pedometer - 50Hz
+  writeRegister(KX126_ODCNTL, 0x02);
+  
+  // Configure pedometer settings
+  // PED_CNTL1: Step counter ODR = 50Hz, count delay time = 96ms
+  writeRegister(KX126_PED_CNTL1, 0x04);
+  
+  // PED_CNTL2: Peak threshold = 2.5g, Jerk threshold = 2.5g
+  writeRegister(KX126_PED_CNTL2, 0x44);
+  
+  // PED_CNTL3: Timer = 150ms, Step time window min = 150ms
+  writeRegister(KX126_PED_CNTL3, 0x44);
+  
+  // PED_CNTL4: Step time window max = 400ms
+  writeRegister(KX126_PED_CNTL4, 0x44);
+  
+  // PED_CNTL5: Step counter watermark = 1 step
+  writeRegister(KX126_PED_CNTL5, 0x01);
+  
+  // Enable pedometer function and put sensor in operating mode
+  // CNTL1: Enable pedometer, set resolution to 16-bit, enable acceleration output
+  writeRegister(KX126_CNTL1, 0xB2);
+  
+  delay(50);  // Wait for sensor to enter operating mode
+}
+
+uint16_t readStepCount() {
+  // Read step counter value (2 bytes)
+  Wire.beginTransmission(KX126_ADDR);
+  Wire.write(KX126_PED_DATA);
+  Wire.endTransmission(false);
+  
+  Wire.requestFrom(KX126_ADDR, 2);
+  uint16_t steps = 0;
+  if (Wire.available() >= 2) {
+    steps = Wire.read();        // Low byte
+    steps |= Wire.read() << 8;  // High byte
+  }
+  
+  return steps;
+}
+
+void writeRegister(byte reg, byte value) {
+  Wire.beginTransmission(KX126_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+byte readRegister(byte reg) {
+  Wire.beginTransmission(KX126_ADDR);
+  Wire.write(reg);
+  Wire.endTransmission(false);
+  
+  Wire.requestFrom(KX126_ADDR, 1);
+  return Wire.read();
+}
+
+void resetStepCounter() {
+  // Put sensor in standby
+  writeRegister(KX126_CNTL1, 0x00);
+  delay(50);
+  
+  // Clear step counter by toggling pedometer bit
+  writeRegister(KX126_CNTL1, 0xB2);
+  
+  // Reset variables
+  stepCount = 0;
+  thresholdReached = false;
+  digitalWrite(SIGNAL_PIN, LOW);
+  
+  Serial.println("Step counter reset");
+}

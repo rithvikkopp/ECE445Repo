@@ -1,0 +1,93 @@
+// Pin definitions
+const int SENSOR_PIN = A0;    // Analog input pin for LM335AH
+const int SIGNAL_PIN = 13;    // Output signal pin (using onboard LED)
+
+// Temperature threshold (37°F = 275.93K)
+const float TEMP_THRESHOLD_K = 275.93;
+
+// Time threshold (2 minutes in milliseconds)
+const unsigned long TIME_THRESHOLD = 120000;
+
+// Variables for temperature monitoring
+unsigned long coldStartTime = 0;
+bool isColdCondition = false;
+bool isSignalActive = false;
+
+// LM335AH calibration constants
+const float REFERENCE_VOLTAGE = 5.0;
+const float SENSOR_CALIBRATION = 10.0;  // mV/°K
+
+void setup() {
+  // Initialize pins
+  pinMode(SENSOR_PIN, INPUT);
+  pinMode(SIGNAL_PIN, OUTPUT);
+  digitalWrite(SIGNAL_PIN, LOW);
+  
+  // Initialize serial communication for debugging
+  Serial.begin(9600);
+  Serial.println("Temperature Monitor Initialized");
+}
+
+void loop() {
+  // Read temperature from LM335AH
+  float tempK = readTemperature();
+  float tempF = (tempK - 273.15) * 9.0/5.0 + 32.0;
+  
+  // Print current temperature (for debugging)
+  Serial.print("Temperature: ");
+  Serial.print(tempF);
+  Serial.println("°F");
+  
+  // Check if temperature is below threshold
+  if (tempF < 37.0) {
+    if (!isColdCondition) {
+      // Start timing when temperature first drops below threshold
+      isColdCondition = true;
+      coldStartTime = millis();
+      Serial.println("Cold condition detected - starting timer");
+    }
+    else {
+      // Check if cold condition has persisted long enough
+      unsigned long timeInCold = millis() - coldStartTime;
+      
+      if (timeInCold >= TIME_THRESHOLD && !isSignalActive) {
+        // Activate signal after 2 minutes of cold
+        digitalWrite(SIGNAL_PIN, HIGH);
+        isSignalActive = true;
+        Serial.println("Temperature below 37°F for 2 minutes - Signal activated!");
+      }
+      
+      if (isSignalActive) {
+        Serial.print("Cold condition maintained for: ");
+        Serial.print(timeInCold / 1000);
+        Serial.println(" seconds");
+      }
+    }
+  }
+  else {
+    // Reset monitoring if temperature rises above threshold
+    if (isColdCondition) {
+      isColdCondition = false;
+      isSignalActive = false;
+      digitalWrite(SIGNAL_PIN, LOW);
+      Serial.println("Temperature rose above threshold - Monitoring reset");
+    }
+  }
+  
+  // Small delay to prevent excessive readings
+  delay(1000);
+}
+
+float readTemperature() {
+  // Read analog value
+  int sensorValue = analogRead(SENSOR_PIN);
+  
+  // Convert analog reading to voltage
+  float voltage = (sensorValue * REFERENCE_VOLTAGE) / 1024.0;
+  
+  // Convert voltage to Kelvin
+  // LM335AH outputs 10mV/°K
+  float temperatureK = (voltage * 100.0);  // Convert V to K
+  
+  return temperatureK;
+}

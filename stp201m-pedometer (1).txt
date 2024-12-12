@@ -1,0 +1,113 @@
+// STP201M Pedometer Click (MIKROE-3567)
+// Uses software serial for communication
+
+#include <SoftwareSerial.h>
+
+// Pin definitions
+const int RX_PIN = 2;  // Connect to TX of STP201M
+const int TX_PIN = 3;  // Connect to RX of STP201M
+const int SIGNAL_PIN = 13;  // Output signal pin (onboard LED)
+
+// Step threshold
+const uint16_t STEP_THRESHOLD = 250;
+
+// Create software serial object
+SoftwareSerial sensorSerial(RX_PIN, TX_PIN);
+
+// Variables
+uint16_t stepCount = 0;
+bool thresholdReached = false;
+
+// Command bytes
+const byte READ_STEPS_CMD[] = {0xFD, 0x00, 0x01, 0x01, 0x01};
+const byte RESET_STEPS_CMD[] = {0xFD, 0x00, 0x01, 0x02, 0x03};
+
+void setup() {
+  // Initialize serial communications
+  Serial.begin(9600);        // For debugging
+  sensorSerial.begin(9600);  // For sensor communication
+  
+  // Initialize signal pin
+  pinMode(SIGNAL_PIN, OUTPUT);
+  digitalWrite(SIGNAL_PIN, LOW);
+  
+  // Wait for sensor to initialize
+  delay(1000);
+  
+  // Reset step counter
+  resetStepCounter();
+  
+  Serial.println("STP201M Pedometer initialized!");
+}
+
+void loop() {
+  // Read current step count
+  uint16_t steps = readStepCount();
+  
+  if (steps != 0xFFFF) {  // Valid reading
+    stepCount = steps;
+    
+    // Print current step count
+    Serial.print("Steps: ");
+    Serial.println(stepCount);
+    
+    // Check if threshold reached
+    if (stepCount >= STEP_THRESHOLD && !thresholdReached) {
+      digitalWrite(SIGNAL_PIN, HIGH);
+      thresholdReached = true;
+      Serial.println("Step threshold reached!");
+    }
+  }
+  
+  // Small delay between readings
+  delay(1000);
+}
+
+uint16_t readStepCount() {
+  // Clear any existing data
+  while (sensorSerial.available()) {
+    sensorSerial.read();
+  }
+  
+  // Send read command
+  for (int i = 0; i < sizeof(READ_STEPS_CMD); i++) {
+    sensorSerial.write(READ_STEPS_CMD[i]);
+  }
+  
+  // Wait for response
+  delay(50);
+  
+  // Read response
+  if (sensorSerial.available() >= 4) {
+    byte response[4];
+    for (int i = 0; i < 4; i++) {
+      response[i] = sensorSerial.read();
+    }
+    
+    // Check response format
+    if (response[0] == 0xFE) {
+      // Extract step count (big endian)
+      uint16_t steps = (response[2] << 8) | response[3];
+      return steps;
+    }
+  }
+  
+  return 0xFFFF;  // Return error value if read fails
+}
+
+void resetStepCounter() {
+  // Send reset command
+  for (int i = 0; i < sizeof(RESET_STEPS_CMD); i++) {
+    sensorSerial.write(RESET_STEPS_CMD[i]);
+  }
+  
+  // Wait for reset to complete
+  delay(100);
+  
+  // Clear step count
+  stepCount = 0;
+  thresholdReached = false;
+  digitalWrite(SIGNAL_PIN, LOW);
+  
+  Serial.println("Step counter reset");
+}
